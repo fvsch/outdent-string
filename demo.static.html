@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>outdent.js: remove extraneous indentation from a multiline string</title>
+
+<style>
+
+body {
+  margin: 0;
+  padding: 10px 30px 40px;
+  font-family: monospace;
+}
+
+body > h1 {
+  margin-top: .5em;
+}
+
+body > h2 {
+  margin-top: 2em;
+}
+
+body > p {
+  max-width: 50em;
+}
+
+/* Controls */
+
+.outdent-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-around;
+  position: fixed;
+  z-index: 100;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 15px;
+  /* padding-right: 220px; */
+  border-top: solid 1px;
+  background: #EEE;
+}
+
+.outdent-options p {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px .5em;
+}
+
+.outdent-options p:last-child {
+  flex-grow: 1;
+  padding: 0;
+  text-align: right;
+}
+
+.outdent-options input[type=number] {
+  width: 3em;
+}
+
+.outdent-options input[type="submit"] {
+  float: right;
+  font: inherit;
+  margin: 0 1em 0 2em;
+}
+
+.highlight-toggle {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  bottom: 0;
+  background: #DDD;
+  color: #222;
+  border: solid 1px black;
+  font: inherit;
+}
+
+.highlight-toggle::before {
+  content: "☐";
+  display: inline-block;
+  width: 1em;
+}
+
+.isHighlighted .highlight-toggle {
+  background: black;
+  color: white;
+}
+
+.isHighlighted .highlight-toggle::before {
+  content: "✔︎";
+}
+
+/* Examples should not be displayed */
+
+.outdent-example {
+  display: none;
+}
+
+/* Result table */
+
+.outdent-results {
+  table-layout: fixed;
+  width: 100%;
+  margin: 2.5em 0;
+  -moz-box-sizing: border-box;
+  box-sizing: border-box;
+}
+
+.outdent-results td {
+  vertical-align: top;
+  width: 50%;
+  padding-bottom: 30px;
+}
+
+.outdent-results td + td {
+  padding-left: 10px;
+}
+
+.outdent-results td[colspan="2"] {
+  padding: 10px 0;
+}
+
+.outdent-results .output {
+  overflow: hidden;
+}
+
+.outdent-results .output > * {
+  position: relative;
+  width: 100%;
+  min-height: 46px;
+  margin: 0;
+  padding: 5px 2px;
+  -moz-tab-size: 4;
+  tab-size: 4;
+  color: #222;
+  -moz-box-sizing: border-box;
+  box-sizing: border-box;
+  border: none;
+}
+
+.outdent-results .output > textarea {
+  border-color: #999;
+  resize: none;
+  font: inherit;
+  border: none !important;
+}
+
+.outdent-results .output > textarea + pre {
+  display: none;
+}
+
+.outdent-results td.output:nth-child(1) > * {
+  background-color: rgba(120,120,0,.1);
+}
+
+.outdent-results td.output:nth-child(2) > * {
+  border-left: none;
+  background-color: rgba(0,0,150,.1);
+}
+
+/* Whitespace highlighting */
+
+.isHighlighted pre span {
+  display: inline-block;
+  color: rgba(0,0,0,.4);
+  text-align: center;
+}
+
+.isHighlighted pre .space {
+  background-color: rgba(255,100,0,.2);
+}
+
+.isHighlighted pre .space::before {
+  content: "·";
+  position: absolute;
+}
+
+.isHighlighted pre .tab {
+  position: relative;
+  background-color: rgba(200,200,0,.2);
+}
+
+.isHighlighted pre .tab::before {
+  content: "";
+  position: absolute;
+  top: 50%; left: 4px; right: 4px;
+  height: 0;
+  border-bottom: solid 1px;
+}
+
+.isHighlighted pre .eol {
+  background-color: rgba(0,200,200,.2);
+}
+
+.isHighlighted pre .eol::before {
+  content: "\\n";
+}
+</style>
+
+<script>
+
+// String.prototype.repeat polyfill 
+if (!String.prototype.repeat) {
+	String.prototype.repeat = function repeat(times) {
+	  return new Array(times + 1).join(this);
+	}
+}
+
+/**
+	Returns num if between min and max (integers),
+	or the boundary which was closer to num.
+*/
+function minmax(num, min, max) {
+	return Math.max(min, Math.min(max, Math.floor(num)))
+}
+
+/**
+	Remove empty lines from text.
+	Depends on: String.prototype.repeat(), minmax()
+	@param {string} text - Multiline string to process
+	@param {number} maxEmptyLines - Maximum consecutive empty lines to allow
+*/
+function removeEmptyLines(text, maxEmptyLines) {
+
+	if (typeof text !== 'string') {
+		throw new TypeError('Param `text` must be a string, was: ' + typeof text)
+	}
+	if (typeof maxEmptyLines !== 'number') {
+		throw new TypeError('Param `maxEmptyLines` must be a number, was: ' + typeof maxEmptyLines)
+	}
+
+	var MAX = minmax(maxEmptyLines, 0, 50)
+
+	// Center of string: N empty lines = N+1 '\n'
+	var re_center = '([ \t]*\n){NUM,}'
+	re_center = re_center.replace('NUM', MAX + 2)
+	re_center = new RegExp(re_center, 'g')
+	text = text.replace(re_center, '\n'.repeat(MAX + 1))
+
+	// Boundaries of string: N empty lines = N '\n' + boundary
+	var re_startend = '(^|[ \t]*\n)([ \t]*\n){NUM,}([ \t]*(\n|$))'
+	re_startend = re_startend.replace('NUM', MAX)
+	re_startend = new RegExp(re_startend, 'g')
+	text = text.replace(re_startend, '\n'.repeat(MAX))
+
+	return text
+}
+
+/**
+	Validate the key:value pairs in `options` using type
+	checks, filter methods and default values from `defaults`.
+
+	Each property of `defaults` should be an object where:
+	- the key is the option name;
+	- the `value` property (required) is the default value;
+	- the `type` property (optional) is a valid JS type and is
+	  inferred from `value` if omitted;
+	- the `filter` property (optional) is a function taking one
+	  value and returning a modified form of this value.
+
+	@param {object} defaults - Template for the returned object,
+	@param {object} options - Values to use if valid, and possibly filter.
+	@returns {object}
+*/
+function mergeOptions(defaults, options) {
+	var validated  = {}
+	for (var prop in defaults) {
+		var value = defaults[prop].value
+		var type  = defaults[prop].type || typeof value
+		if (prop in options && typeof options[prop] === type) {
+			value = options[prop]
+			if (defaults[prop].filter) {
+				value = defaults[prop].filter(value)
+			}
+		}
+		validated[prop] = value
+	}
+	return validated
+}
+
+/**
+	Tries to detect and remove extraneous leading whitespace
+	from a multiline string. Made for strings of code, especially
+	the results of element.innerHTML, element.outerHTML, and
+	element.textContent.
+	Depends on: mergeOptions(), minmax() String.prototype.repeat()
+
+	@param {string} text - Text to process
+	@param {{
+		ignoreHead:number,
+		ignoreTail:number,
+		tabToSpaces:number
+	}} options - Optional parameters
+	@returns {string}
+*/
+function removeExtraIndentation(text, options) {
+	if (typeof text !== 'string') {
+		throw new TypeError('Param `text` must be a string, was: ' + typeof text)
+	}
+	if (typeof options !== 'object') {
+		options = {}
+	}
+
+	var LINE_SPLITTER_RE = /^.*(\r\n|\n|$)/gm
+	var TAB_WEIGHT = 3
+	var TYPE_SPACES = 'spaces'
+	var TYPE_TABS = 'tabs'
+
+	// Option configuration
+	var defaults = {
+		ignoreHead: {
+			value: 1,
+			filter: function(x) { return minmax(x, 0, 4) }
+		},
+		ignoreTail: {
+			value: 0,
+			filter: function(x) { return minmax(x, 0, 4) }
+		},
+		tabWidth: {
+			value: 4,
+			filter: function(x) { return minmax(x, 1, 8) }
+		},
+	}
+
+	// Merging options
+	options = mergeOptions(defaults, options)
+	var softTab = new Array(options.tabWidth + 1).join(' ')
+
+	// Whitespace-mangling utils
+	var getWhitespaceInfo = function(str) {
+		var result = {
+			empty: (str.length === 0),
+			hasMixed: false,
+			dominantType: TYPE_SPACES
+		}
+		if (!result.empty) {
+			var spaces = (str.match(/ /g) || []).length
+			var tabs = (str.match(/\t/g) || []).length
+			if (tabs > 0 && spaces > 0) {
+				result.hasMixed = true
+			}
+			if (tabs * TAB_WEIGHT > spaces) {
+				result.dominantType = TYPE_TABS
+			}
+		}
+		return result
+	}
+	var unmixWhitespace = function(str, targetType) {
+		if (targetType === TYPE_SPACES && str.indexOf('\t') !== -1) {
+			str = str.replace(/\t/g, softTab)
+		}
+		if (targetType === TYPE_TABS && str.indexOf(' ') !== -1) {
+			var total = str.replace(/\t/g, softTab).length
+			var numTabs = Math.round(total / options.tabWidth)		
+			str = new Array( numTabs + 1 ).join('\t')
+		}
+		return str
+	}
+
+	// Remove empty lines
+	if (typeof options.maxEmptyLines === 'number') {
+		text = removeEmptyLines(text, options.maxEmptyLines)
+	}
+
+	// Split lines and isolate leading whitespace
+	var leading = []
+	var content = []
+	text.match(LINE_SPLITTER_RE)
+	.forEach(function(line) {
+		// We sometimes get an extraneous empty string match
+		// Note that even an empty line should be '\n'
+		if (line.length > 0) {
+			var lineLeading = line.split(/[^ \t]/, 1)[0]
+			var lineContent = line.slice(lineLeading.length)
+			leading.push(lineLeading)
+			content.push(lineContent)
+		}
+	})
+
+	// Analyse whitespace
+	var wsInfo = getWhitespaceInfo( leading.join('') )
+	
+	// No leading whitespace to work on
+	if (wsInfo.empty) {
+		return text
+	}
+	// Determine the indent we can remove, and chop it off
+	else {
+		var newText = ''
+		var numLines = leading.length
+		var indentLengths = []
+		var removable
+
+		// First pass: test for removable leading whitespace
+		leading.forEach(function(value, index, arr) {
+			if (wsInfo.hasMixed) {
+				arr[index] = unmixWhitespace(value, wsInfo.dominantType)
+			}
+			if (
+				(index >= options.ignoreHead) &&
+				(index < numLines - options.ignoreTail) &&
+				(content[index].trim() !== '')
+			) {
+				indentLengths.push(value.length)
+			}
+		})
+		removable = Math.min.apply(undefined, indentLengths) || 0
+
+		// Second pass: make final string
+		leading.forEach(function(value, index, arr) {
+			newText += leading[index].slice(removable) + content[index]
+		})
+
+		return newText
+	}
+}
+
+function highlight(text) {
+	text = text.replace(/</g, '&lt;')
+	text = text.replace(/ /g, '<span class="space"> </span>')
+	text = text.replace(/\t/g, '<span class="tab">\t</span>')
+	text = text.replace(/\n/g, '<span class="eol"></span>\n')
+	return text
+}
+
+function getOptionValues() {
+	var form = document.querySelector('form')
+	return {
+		maxEmptyLines: parseInt(form.querySelector('[name=maxEmptyLines]').value, 10),
+		tabWidth: parseInt(form.querySelector('[name=tabWidth]').value, 10),
+		ignoreHead: parseInt(form.querySelector('[name=ignoreHead]').value, 10),
+		ignoreTail: parseInt(form.querySelector('[name=ignoreTail]').value, 10),
+	}
+}
+
+function updateExampleLeft(pre, text) {
+	pre.innerHTML = highlight(text)
+}
+
+function updateExampleRight(pre, text, options) {
+	text = removeEmptyLines(text, options.maxEmptyLines)
+	text = removeExtraIndentation(text, options)
+	pre.innerHTML = highlight(text)
+}
+
+function updateExamples() {
+	var options = getOptionValues()
+	var sources = document.querySelectorAll('.outdent-results .original pre')
+	var results = document.querySelectorAll('.outdent-results .modified pre')
+	for (var i = 0; i < sources.length; i++) {
+		console.log(i)
+		var text = sources[i].textContent
+		updateExampleRight(results[i], text, options)
+	}
+}
+
+function makeEditable(pre) {
+	var textarea = document.createElement('textarea')
+	textarea.textContent = pre.textContent
+	textarea.spellcheck = false
+	pre.parentElement.insertBefore(textarea, pre)
+
+	var height = Math.max(pre.clientHeight, textarea.scrollHeight)
+	textarea.style.minHeight = height + 'px'
+
+	textarea.addEventListener('blur', function(event){
+		var el = event.currentTarget
+		var td = el.parentElement
+		if (td.classList.contains('original')) {
+			var text = el.value
+			var preLeft = td.querySelector('pre')
+			var preRight = td.nextElementSibling.querySelector('pre')
+			var options = getOptionValues()
+			updateExampleLeft(preLeft, text)
+			updateExampleRight(preRight, text, options)
+		}
+		td.removeChild(el)
+	})
+
+	textarea.focus()
+}
+
+function buildExamples() {
+	var options = getOptionValues()
+	var container = document.querySelector('table')
+	var examples  = document.querySelectorAll('.outdent-example')
+	var rows = ''
+
+	for (var i = 0; i < examples.length; i++) {
+		var type = examples[i].dataset.type;
+		var origin = examples[i].firstElementChild
+		var title = '' + (i+1) + '. ' + examples[i].title
+
+		var source = (type === 'inner' ) ? origin.textContent : origin.outerHTML
+		var newText = removeEmptyLines(source, options.maxEmptyLines)
+		    newText = removeExtraIndentation(newText, options)
+
+		var original = highlight(source)
+		var modified = highlight(newText)
+
+		var cell1 = '<td colspan="2">' + title + '</td>'
+		var cell2 = '<td class="original output"><pre>' + original + '</pre></td>'
+		var cell3 = '<td class="modified output"><pre>' + modified + '</pre></td>'
+		rows += '<tr>' + cell1 + '</tr><tr>' + cell2 + cell3 + '</tr>'
+	}
+	container.innerHTML = rows
+
+	var pres = document.querySelectorAll('pre')
+	for (var i = 0; i < pres.length; i++) {
+		pres[i].addEventListener('click', function(event){
+			makeEditable(event.currentTarget)
+		})
+	}
+}
+
+function init() {
+	buildExamples()
+	var form = document.querySelector('form')
+	form.addEventListener('submit', function(e){
+		e.preventDefault()
+		updateExamples()
+	})
+}
+</script>
+
+</head>
+
+<body onload="init()" class="isHighlighted">
+
+<h1><a href="outdent.js">outdent.js</a></h1>
+<p>
+  Detect and remove extraneous leading whitespace from multiline strings.<br>
+  Only tested in latest Firefox, Safari and Chrome (August 2014).<br>
+  Fair warning: this is experimental, and might have subpar performance.
+</p>
+
+<h2>Examples</h2>
+
+<p>
+  All examples are dynamic: modify the source on the left and see results on the right.
+  Use the form at the bottom to modify options passed to the function.
+</p>
+
+<form class="outdent-options">
+  <!--<button type="button" class="highlight-toggle"
+    onclick="document.body.classList.toggle('isHighlighted')">
+    Highlight whitespace
+  </button>-->
+  <p>
+    <label for="option-4">maxEmptyLines</label>
+    <input id="option-4" name="maxEmptyLines" type="number" value="1" min="0" max="10">
+  </p>
+  <p>
+    <label for="option-1">tabWidth</label>
+    <input id="option-1" name="tabWidth" type="number" value="4" min="1" max="8">
+  </p>
+  <p>
+    <label for="option-2">ignoreHead</label>
+    <input id="option-2" name="ignoreHead" type="number" value="1" min="0" max="4">
+  </p>
+  <p>
+    <label for="option-3">ignoreTail</label>
+    <input id="option-3" name="ignoreTail" type="number" value="0" min="0" max="4">
+  </p>
+  <p>
+    <input type="submit" value="Update examples">
+  </p>
+</form>
+
+<table class="outdent-results"></table>
+
+<div class="outdent-example" data-type="inner" title="Paste your own code…">
+<div></div>
+</div>
+
+<div class="outdent-example" data-type="inner" title="textContent: [el] Test [/el]">
+<p> Test </p>
+</div>
+
+<div class="outdent-example" data-type="inner" title="textContent: [el]\nTest\n[/el]">
+<p>
+Test
+</p>
+</div>
+
+<div class="outdent-example" data-type="outer" title="outerHTML: Empty lines">
+      <p>
+
+
+        Test
+
+
+
+
+
+      </p>
+</div>
+
+<div class="outdent-example" data-type="inner" title="textContent: Empty lines">
+      <p>
+
+
+        Test
+
+
+
+
+
+      </p>
+</div>
+
+<div class="outdent-example" data-type="inner" title="textContent: [el]\n····Test\n[/el]">
+<p>
+    Test
+</p>
+</div>
+
+<div class="outdent-example" data-type="outer" title="From https://bugzilla.mozilla.org/show_bug.cgi?id=1046803">
+<!-- Example from https://bugzilla.mozilla.org/attachment.cgi?id=8465485 -->
+  <div>
+    <h2>
+      My title
+    </h2>
+      
+    <p>
+      Published
+      <time>two days ago</time>
+      by
+      <span>Author</span>
+    </p>
+    <div>
+      <div>
+        <div>
+          <div>
+            <div>
+              <div>
+                <em>That</em>
+                will be displayed far to the right.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+<!-- / Example -->
+</div>
+
+<div class="outdent-example" data-type="outer" title="Extract from above">
+<!-- Example from https://bugzilla.mozilla.org/attachment.cgi?id=8465485 -->
+              <div>
+                <em>That</em>
+                will be displayed far to the right.
+              </div>
+<!-- / Example -->
+</div>
+
+<div class="outdent-example" data-type="outer" title="From twitter.com">
+<!-- Example from https://twitter.com/ login page -->
+  <div id="activity-popup-dialog" class="modal-container">
+  <div class="close-modal-background-target"></div>
+  <div class="modal draggable">
+    <div class="modal-content clearfix">
+      <button type="button" class="modal-btn modal-close js-close">
+  <span class="Icon Icon--close Icon--medium">
+    <span class="visuallyhidden">Close</span>
+  </span>
+</button>
+
+
+      <div class="modal-header">
+        <h3 class="modal-title"></h3>
+      </div>
+
+      <div class="modal-body">
+        <div class="tweet-loading">
+  <div class="spinner-bigger"></div>
+</div>
+
+        <div class="activity-tweet modal-tweet clearfix"></div>
+        <div class="loading">
+          <span class="spinner-bigger"></span>
+        </div>
+        <div class="activity-content clearfix"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- / Example -->
+</div>
+
+<div class="outdent-example" data-type="outer" title="From alsacreations.com">
+<!-- Example from http://www.alsacreations.com/ -->
+	<div class="newsblock first">
+	
+	<h2 class="titre">
+		<span class="hometype">Outil :</span> <a href="http://www.alsacreations.com/outils/lire/1637-type-quest-css-opentype-typographie.html" title="Type Quest: l'OpenType en CSS">Type Quest: l'OpenType en CSS</a>	</h2> 
+
+		<div class="meta">
+	  <span class="metafirst">
+	  par <a href="http://www.alsacreations.com/profil/lire/29058-stphanie-w.html" title="profil de Stéphanie W.">Stéphanie W.</a>	  le 07 Juillet 2014	  dans Webdesign	  </span>
+	  
+	  <a class="hometip comc comc" title="8 commentaires pour Type Quest: l'OpenType en CSS" href="http://www.alsacreations.com/outils/lire/1637-type-quest-css-opentype-typographie.html#commentaires">8 commentaires</a>	  </div>
+	  
+	  <img src="http://cdn.alsacreations.net/xmedia/doc/medium/typequestion-home1.jpg" alt="" class="illustration" />
+	  <div class="texte">
+		
+		<p>Avec les avancées en CSS, il est possible d'utiliser de plus en plus de fonctionnalités typographiques du format OpenType en CSS, de quoi ravir les amateurs de jolies typographies. À la KiwiParty de 2012 déjà, Vincent De Oliveira nous donnait un avant-goût de ces propriétés. Pour les graphistes&#8230;<br /><a href="http://www.alsacreations.com/outils/lire/1637-type-quest-css-opentype-typographie.html" class="readnext" title="Lire la suite de Type Quest: l'OpenType en CSS">Lire la suite et commenter &raquo;</a></p>	  </div>
+	  
+	  
+	</div>
+<!-- / Example -->
+</div>
+
+<div class="outdent-example" data-type="inner" title="textContent: From alsacreations.com (same as above)">
+<!-- Example from http://www.alsacreations.com/ -->
+	<div class="newsblock first">
+	
+	<h2 class="titre">
+		<span class="hometype">Outil :</span> <a href="http://www.alsacreations.com/outils/lire/1637-type-quest-css-opentype-typographie.html" title="Type Quest: l'OpenType en CSS">Type Quest: l'OpenType en CSS</a>	</h2> 
+
+		<div class="meta">
+	  <span class="metafirst">
+	  par <a href="http://www.alsacreations.com/profil/lire/29058-stphanie-w.html" title="profil de Stéphanie W.">Stéphanie W.</a>	  le 07 Juillet 2014	  dans Webdesign	  </span>
+	  
+	  <a class="hometip comc comc" title="8 commentaires pour Type Quest: l'OpenType en CSS" href="http://www.alsacreations.com/outils/lire/1637-type-quest-css-opentype-typographie.html#commentaires">8 commentaires</a>	  </div>
+	  
+	  <img src="http://cdn.alsacreations.net/xmedia/doc/medium/typequestion-home1.jpg" alt="" class="illustration" />
+	  <div class="texte">
+		
+		<p>Avec les avancées en CSS, il est possible d'utiliser de plus en plus de fonctionnalités typographiques du format OpenType en CSS, de quoi ravir les amateurs de jolies typographies. À la KiwiParty de 2012 déjà, Vincent De Oliveira nous donnait un avant-goût de ces propriétés. Pour les graphistes&#8230;<br /><a href="http://www.alsacreations.com/outils/lire/1637-type-quest-css-opentype-typographie.html" class="readnext" title="Lire la suite de Type Quest: l'OpenType en CSS">Lire la suite et commenter &raquo;</a></p>	  </div>
+	  
+	  
+	</div>
+<!-- / Example -->
+</div>
+
+<div class="outdent-example" data-type="outer" title="From alsacreations.com">
+<!-- Example from http://www.alsacreations.com/ -->
+    <div id="login">
+      <h2>Alsanaute ? <span>connectez-vous</span></h2>
+      <form id="login-form" action="/ident/login/" method="post">
+        <div id="login-first">
+  		  <label for="login-name"><span>Pseudo</span><input id="login-name" class="input-mini" name="name" value="" title="pseudo" type="text" /></label>
+  		  <label for="login-pass"><span>Mot de passe</span><input id="login-pass" class="input-mini" name="password" value="" title="mot de passe" type="text" /></label>
+  		  </div>
+  		  <div id="login-second">
+  		  <input value="Connexion" name="login-submit" id="login-submit" class="awesome green" type="submit" />
+		    <p class="getlink"><a href="/ident/lost/" id="login-lost-link">Identifiants oubliés&nbsp;?</a></p>
+		    <p class="getlink"><a href="/ident/register/">S'inscrire (gratuit)</a></p>
+		    </div>
+		  </form>
+    </div> <!-- login -->
+<!-- / Example -->
+</div>
+
+<div class="outdent-example" data-type="outer" title="From lemonde.fr">
+<!-- Example from http://www.lemonde.fr/ -->
+      <div class="conteneur_haut">
+         <p class="gauche">
+            <a href="/" class="actif">Le Monde</a>
+            <span data-target="_blank" data-href="aHR0cDovL3d3dy50ZWxlcmFtYS5mci8=" class="obf">Télérama</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5tb25kZS1kaXBsb21hdGlxdWUuZnIv" class="obf">Le Monde diplomatique</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5odWZmaW5ndG9ucG9zdC5mci8=" class="obf">Le Huffington Post</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5jb3VycmllcmludGVybmF0aW9uYWwuY29tLw==" class="obf">Courrier international</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5sYXZpZS5mci8=" class="obf">La Vie</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5hdWphcmRpbi5pbmZvLw==" class="obf">au Jardin</span>         </p>
+         <div class="droit">
+<span data-href="L2Fiby8/Y2xlZj1CVE5fQUJPR09MRDE0" class="bt_abo obf" onclick="return xt_click(this, 'C', lmd.context.page.xiti.xtn2, 'entrees_tunnel_abo::header','N');" title="Abonnez-vous au Monde à partir de 1 ¬">S'abonner au Monde à
+            partir de 1 €</span>                        <ul class="services droite">
+               <li>
+<span data-href="L3NlcnZpY2VzLw==" class="obf">Services Le Monde ▾</span>                  <div>
+                     <ul>
+                        <li><strong>Boutique Le Monde</strong></li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL2JvdXRpcXVlLmxlbW9uZGUuZnIvI3h0b3I9QUQtNDY=" class="obf">Accueil</span>                        </li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL2JvdXRpcXVlLmxlbW9uZGUuZnIvaG9ycy1zZXJpZXMuaHRtbCN4dG9yPUFELTEwMQ==" class="obf">Hors-séries</span>                        </li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL2JvdXRpcXVlLmxlbW9uZGUuZnIvbGl2cmVzLmh0bWwjeHRvcj1BRC0xMDA=" class="obf">Livres</span>                        </li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL2JvdXRpcXVlLmxlbW9uZGUuZnIvZHZkLTEuaHRtbCN4dG9yPUFELTk4" class="obf">DVD</span>                        </li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL2JvdXRpcXVlLmxlbW9uZGUuZnIvY2QuaHRtbCN4dG9yPUFELTk5" class="obf">CD</span>                        </li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL2JvdXRpcXVlLmxlbW9uZGUuZnIvdW5lcy1kdS1tb25kZS5odG1sI3h0b3I9QUQtMTQ5" class="obf">Unes du Monde</span>                        </li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL2JvdXRpcXVlLmxlbW9uZGUuZnIvbG9pc2lycy1ldC1wYXBldGVyaWUuaHRtbCN4dG9yPUFELTEwMw==" class="obf">Loisirs &amp; papeterie</span>                        </li>
+                     </ul>
+                     <ul>
+                        <li><strong>Partenaires Le Monde</strong></li>
+                        <li>
+<span data-target="" data-href="aHR0cDovL3ZvaXR1cmUtb2NjYXNpb24ubGVtb25kZS5mcg==" class="obf">Annonces auto</span>                        </li>
+                        <li>
+<span data-target="_blank" data-href="aHR0cDovL29mZnJlcy5vZmZyZXMtZW1wbG9pLm1vbnN0ZXIuZnIvP2NoPUxFTU9OREU=" class="obf">Annonces emploi</span>                        </li>
+                        <li>
+<span data-target="" data-href="aHR0cDovL2ltbW9iaWxpZXIubGVtb25kZS5mci8=" class="obf">Annonces immo</span>                        </li>
+                        <li>
+<span data-target="" data-href="aHR0cDovL2NvbXBhcmF0ZXVycy1iYW5xdWVzLmxlbW9uZGUuZnIv" class="obf">Comparateur de banques</span>                        </li>
+                        <li>
+<span data-target="" data-href="aHR0cDovL2NyZWRpdC5sZW1vbmRlLmZyLw==" class="obf">Comparateur de crédit</span>                        </li>
+                        <li>
+<span data-target="" data-href="aHR0cDovL2FuZ2xhaXMubGVtb25kZS5mcg==" class="obf">Cours d'anglais</span>                        </li>
+                        <li>
+<span data-target="" data-href="aHR0cDovL3ByaXgtaW1tb2JpbGllci5sZW1vbmRlLmZyL3ByaXgtaW1tb2JpbGllci8=" class="obf">Prix de l'immobilier</span>                        </li>
+                        <li>
+<span data-target="" data-href="aHR0cDovL3Nob3BwaW5nLmxlbW9uZGUuZnI=" class="obf">Shopping</span>                        </li>
+                     </ul>
+                  </div>
+               </li>
+            </ul>
+         </div>
+      </div>
+<!-- / Example -->
+</div>
+
+<div class="outdent-example" data-type="outer" title="From lemonde.fr (extract from above)">
+<!-- Example from http://www.lemonde.fr/ -->
+         <p class="gauche">
+            <a href="/" class="actif">Le Monde</a>
+            <span data-target="_blank" data-href="aHR0cDovL3d3dy50ZWxlcmFtYS5mci8=" class="obf">Télérama</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5tb25kZS1kaXBsb21hdGlxdWUuZnIv" class="obf">Le Monde diplomatique</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5odWZmaW5ndG9ucG9zdC5mci8=" class="obf">Le Huffington Post</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5jb3VycmllcmludGVybmF0aW9uYWwuY29tLw==" class="obf">Courrier international</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5sYXZpZS5mci8=" class="obf">La Vie</span>            <span data-target="_blank" data-href="aHR0cDovL3d3dy5hdWphcmRpbi5pbmZvLw==" class="obf">au Jardin</span>         </p>
+<!-- / Example -->
+</div>
+
+</body>
+</html>
